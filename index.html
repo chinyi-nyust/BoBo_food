@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <title>AAFCO 貓主食罐 檢核 + 每日餵食判定（合併 14 範例 / 儲存 / 歸零）</title>
+  <style>
+    body { font-family: sans-serif; margin: 2em; background: #fefefe; }
+    table { border-collapse: collapse; width: 100%; margin-top: 1em; }
+    th, td { border: 1px solid #ccc; padding: 6px; text-align: center; }
+    th { background: #f2f2f2; }
+    input { width: 5.6em; }
+    .pass { background: #d4edda; }
+    .fail { background: #f8d7da; }
+    .controls { margin-top: 1em; display:flex; flex-wrap: wrap; gap:8px; align-items:center; }
+    .muted { color: #888; font-size: 0.9em; margin-left: 0.5em; }
+    .note  { font-size: 0.9em; color: #555; margin-top: 0.5em; line-height: 1.4; }
+    .pill  { padding:2px 8px; border-radius:999px; border:1px solid #ccc; }
+    .hide  { display:none; }
+    td.reason { text-align:left; font-size:.9em; }
+    #dailyBox { border:1px solid #ccc; padding:12px; border-radius:8px; margin-top:16px; background:#fafafa; }
+    #judgeText.pass { color:#0a7a32; font-weight:700; }
+    #judgeText.warn { color:#b36b00; font-weight:700; }
+    #judgeText.fail { color:#a40000; font-weight:700; }
+    .wide { min-width: 12em; }
+  </style>
+</head>
+<body>
+  <h2>AAFCO 貓主食罐 乾物比與每天熱量檢核（合併 13 範例｜圖片 OCR｜可儲存）</h2>
+
+  <div class="controls">
+    <button onclick="addRow()">➕ 新增一列</button>
+    <button onclick="loadExamplesAll()">📥 載入全部 13 款範例</button>
+    <button onclick="downloadCSV()">⬇️ 下載 CSV</button>
+    <button onclick="clearTable()">🗑️ 清空表格</button>
+    <span class="muted">輸入 as-fed（包裝）數值，系統自動算 DM、磷/100kcal、ml/包、kcal/包；可儲存/載入表格，不用重打。</span>
+    <br style="flex-basis:100%">
+    <button onclick="saveTable()">💾 儲存表格資料</button>
+    <button onclick="loadTable()">📂 載入已儲存</button>
+    <button onclick="clearSaved()">🗑️ 清除已儲存</button>
+    <button onclick="resetQty()">🧻 每天包數歸零</button>
+  </div>
+
+  <div class="controls">
+    <input type="file" id="imgInput" accept="image/*">
+    <button id="ocrToRow">🧠 圖片 OCR → 新增一列</button>
+    <span id="ocrStatus" class="muted"></span>
+    <button id="pasteText">貼上 OCR 文字 → 新增一列</button>
+  </div>
+
+  <!-- 檢核模式切換 -->
+  <div class="controls">
+    <label>檢核模式：
+      <select id="mode">
+        <option value="aafco" selected>AAFCO（DM：維持≥蛋白26/脂肪9）</option>
+        <option value="literature">文獻建議（蛋白 30–45% DM、脂肪≥25% DM）</option>
+        <option value="both">兩者都要（同時符合）</option>
+      </select>
+    </label>
+    <span class="muted">切換後表格只顯示相關欄位，並在右側提示通過/偏低/偏高。</span>
+  </div>
+
+  <!-- 主表 -->
+  <table id="dataTable">
+    <thead>
+      <tr>
+        <th class="wide">品牌/口味</th>
+        <th>蛋白%<br>(as-fed)</th>
+        <th>脂肪%</th>
+        <th>纖維%</th>
+        <th>灰分%</th>
+        <th>碳水%</th>
+        <th>水分%</th>
+        <th>kcal/kg</th>
+        <th>磷% (as-fed)</th>
+        <th>水分 ml/100g</th>
+        <th>每包淨重 (g)</th>
+        <th>水分 ml/包</th>
+        <th>kcal/g</th>
+        <th>kcal/包</th>
+        <th class="col-aafco">蛋白(DM)</th>
+        <th class="col-aafco">脂肪(DM)</th>
+        <th>蛋白(DM)</th>
+        <th>脂肪(DM)</th>
+        <th>磷/100kcal (mg)</th>
+        <th>低磷≤250</th>
+        <th class="col-aafco">AAFCO 維持</th>
+        <th class="col-lit">文獻檢核</th>
+        <th class="col-both">同時符合</th>
+        <th>每天包數</th>
+        <th>kcal/日（此口味）</th>
+        <th class="reason">提示（通過/偏低/偏高）</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <!-- 每日餵食判定 -->
+  <div id="dailyBox">
+    <strong>📦 每日餵食判定（以 DER 參考表為主）</strong><br>
+    <div class="controls" style="margin:8px 0;">
+      <label>體重(kg)：<input id="bw" type="number" step="0.1" value="5"></label>
+      <label>DER 來源：
+        <select id="derSource">
+          <option value="table" selected>參考表（0.5kg 刻度）</option>
+          <option value="formula">公式（連續）</option>
+        </select>
+      </label>
+      <label>DER 倍數：
+        <select id="derFactor">
+          <option value="0.8">0.8 肥胖/減重</option>
+          <option value="1.0">1.0 久坐成貓</option>
+          <option value="1.1">1.1 中年/老貓</option>
+          <option value="1.2" selected>1.2 已結紮成貓</option>
+          <option value="1.4">1.4 未結紮成貓</option>
+        </select>
+      </label>
+      <label>允許誤差 ±%：<input id="tol" type="number" step="1" value="10"></label>
+      <button id="recalcDaily">重新判定</button>
+    </div>
+    <div>
+      合計熱量 <strong id="sumKcal">0</strong> kcal/日　|　表格目標 <strong id="targetKcal">0</strong> kcal/日　|　
+      <span id="judgeText" class="pill">尚未計算</span>
+    </div>
+    <div class="note">表格值以 0.5 kg 為刻度，會將體重四捨五入到最接近 0.5 kg，並用 RER=70×W^0.75 × 倍數計得。判定：在目標 ± 允許誤差% 內＝「達標」，小於＝「偏低」，大於＝「偏高」。</div>
+  </div>
+
+  <div class="note">
+    📏 <strong>標準與範圍</strong><br>
+    ‧ AAFCO（DM，維持）：蛋白≥26%、脂肪≥9%。<br>
+    ‧ 文獻建議：蛋白 30–45% DM、脂肪≥25% DM。<br>
+    ‧ 低磷參考：≤250 mg/100kcal（腎貓可考慮 ≤200）。<br>
+    ‧ 水分 ml/100g ＝ 水分%（水密度≈1 g/ml）；水分 ml/包 ＝ 水分% × 包裝重量(g) ÷ 100；kcal/g ＝ kcal/kg ÷ 1000；kcal/包 ＝ kcal/g × 包裝重量(g)。
+  </div>
+
+  <script>
+    const LS_KEY = 'AAFCO_DM_TABLE_ALL14';
+
+    function fmt(n, d=1){ return (n==null || isNaN(n))? '' : (+n).toFixed(d); }
+    function num(val){ const n = parseFloat(val); return isNaN(n)? null : n; }
+
+    function modeNow(){ return document.getElementById('mode').value; }
+    function applyMode(){
+      const m = modeNow();
+      document.querySelectorAll('.col-aafco').forEach(el=> el.classList.toggle('hide', !(m==='aafco'||m==='both')));
+      document.querySelectorAll('.col-lit').forEach(el=> el.classList.toggle('hide', !(m==='literature'||m==='both')));
+      document.querySelectorAll('.col-both').forEach(el=> el.classList.toggle('hide', !(m==='both')));
+    }
+    document.getElementById('mode').addEventListener('change', ()=> {
+      document.querySelectorAll('#dataTable tbody tr').forEach(tr=> calc(tr));
+    });
+
+    function literatureJudge(pDM, fDM){
+      if(pDM==null || fDM==null) return {pass:false, reason:'缺少數值'};
+      if(pDM < 30) return {pass:false, reason:'蛋白偏低 (<30% DM)'};
+      if(pDM > 45) return {pass:false, reason:'蛋白偏高 (>45% DM)'};
+      if(fDM < 25) return {pass:false, reason:'脂肪偏低 (<25% DM)'};
+      return {pass:true, reason:'通過'};
+    }
+    function aafcoReason(pDM,fDM){
+      const lacks = [];
+      if(pDM==null || fDM==null) return '缺少數值';
+      if(pDM<26) lacks.push('蛋白<26%');
+      if(fDM<9)  lacks.push('脂肪<9%');
+      return lacks.join('、');
+    }
+
+    function calc(tr){
+      const qs = sel => tr.querySelector(sel);
+      const get = cls => num(qs('input.'+cls)?.value);
+      const set = (cls, v, d=1) => { const td = qs('td.'+cls); if(td) td.textContent = fmt(v,d); };
+      const mark = (cls, ok) => { const td = qs('td.'+cls); if(!td) return; td.textContent = ok? '✅ 合格':'❌ 不合格'; td.className = cls + ' ' + (ok? 'pass':'fail'); };
+
+      const p = get('protein'), f = get('fat'), fi = get('fiber'), ash = get('ash'), mo = get('moisture'), me = get('me'), pphos = get('p'), pkg = get('pkg'), qty = get('qty');
+      let carb = get('carb');
+      if(carb==null && [p,f,fi,ash,mo].every(v=>v!=null)){ const s=p+f+fi+ash+mo; carb = (100-s); if(carb<0) carb=null; if(qs('input.carb') && carb!=null) qs('input.carb').value = fmt(carb,1); }
+
+      const dm = (mo!=null)? (100-mo) : null;
+      const pDM = (dm && p!=null)? p/dm*100 : null;
+      const fDM = (dm && f!=null)? f/dm*100 : null;
+
+      const kcal100g = (me!=null)? me/10 : null;
+      const kcalPerG  = (me!=null)? me/1000 : null;
+
+      const p1000 = (kcal100g && p!=null)? (p*1000)/kcal100g : null;
+      const f1000 = (kcal100g && f!=null)? (f*1000)/kcal100g : null;
+
+      const waterMl100 = (mo!=null)? mo : null;
+      const waterPkg   = (mo!=null && pkg!=null)? mo/100 * pkg : null;
+      const kcalPkg    = (kcalPerG!=null && pkg!=null)? kcalPerG * pkg : null;
+      const kcalDay    = (kcalPkg!=null && qty!=null)? kcalPkg * qty : null;
+
+      const pMg100 = (pphos!=null && kcal100g)? (100000*pphos)/kcal100g : null;
+
+      const okAafco = (pDM!=null && fDM!=null && pDM>=26 && fDM>=9);
+      const lit = literatureJudge(pDM, fDM);
+      const okBoth = okAafco && lit.pass;
+
+      set('proteinDM', pDM);
+      set('fatDM', fDM);
+      set('p1000', p1000);
+      set('f1000', f1000);
+      set('waterml', waterMl100);
+      set('waterpkg', waterPkg, 1);
+      set('kcalg', kcalPerG, 2);
+      set('kcalpkg', kcalPkg, 0);
+      set('kcalday', kcalDay, 0);
+      set('pmg100', pMg100, 0);
+
+      mark('lowp', (pMg100!=null)? (pMg100<=250) : null);
+      mark('aafco', okAafco);
+      mark('lit', lit.pass);
+      mark('both', okBoth);
+
+      const r = qs('td.reason'); if(r){ r.textContent = (modeNow()==='aafco')
+          ? (okAafco? '通過' : aafcoReason(pDM,fDM))
+          : (modeNow()==='literature'
+              ? (lit.pass? '通過' : lit.reason)
+              : (okBoth? '通過' : (!okAafco? 'AAFCO未達：'+aafcoReason(pDM,fDM) : '文獻未達：'+lit.reason))
+            );
+      }
+      updateDailySummary();
+      applyMode();
+    }
+
+    function rer(w){ return 70 * Math.pow(w, 0.75); }
+    function tableDER(weight, factor){
+      const src = document.getElementById('derSource').value;
+      let w = weight;
+      if(src==='table'){ w = Math.round(weight*2)/2; }
+      return rer(w) * factor;
+    }
+
+    function updateDailySummary(){
+      const rows = document.querySelectorAll('#dataTable tbody tr');
+      let sum = 0;
+      rows.forEach(tr=>{
+        const pkg = num(tr.querySelector('input.pkg')?.value);
+        const me = num(tr.querySelector('input.me')?.value);
+        const qty = num(tr.querySelector('input.qty')?.value);
+        if(pkg!=null && me!=null && qty!=null){
+          const kcalg = me/1000;
+          const kcalpkg = kcalg*pkg;
+          sum += kcalpkg * qty;
+        }
+      });
+      const bw = parseFloat(document.getElementById('bw').value||'5');
+      const factor = parseFloat(document.getElementById('derFactor').value||'1.2');
+      const target = tableDER(bw, factor);
+      document.getElementById('sumKcal').textContent = Math.round(sum);
+      document.getElementById('targetKcal').textContent = Math.round(target);
+      const tol = parseFloat(document.getElementById('tol').value||'10');
+      const judge = document.getElementById('judgeText');
+      if(!sum || !target){ judge.textContent='尚未計算'; judge.className='pill'; return; }
+      const diffPct = (sum-target)/target*100;
+      const adiff = Math.abs(diffPct);
+      let label='達標', cls='pass';
+      if(adiff>tol){ label = (sum>target)? '偏高' : '偏低'; cls='fail'; }
+      else if(adiff>tol/2){ cls='warn'; label = (sum>target)? '略高' : '略低'; }
+      judge.textContent = `${label}（差距 ${diffPct.toFixed(1)}%）`;
+      judge.className = `pill ${cls}`;
+    }
+
+    function addRow(data={}){
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><input class="name wide" value="${data.name||''}"></td>
+        <td><input class="protein" value="${data.protein||''}"></td>
+        <td><input class="fat" value="${data.fat||''}"></td>
+        <td><input class="fiber" value="${data.fiber||''}"></td>
+        <td><input class="ash" value="${data.ash||''}"></td>
+        <td><input class="carb" value="${data.carb||''}"></td>
+        <td><input class="moisture" value="${data.moisture||''}"></td>
+        <td><input class="me" value="${data.me||''}"></td>
+        <td><input class="p" value="${data.p||''}" placeholder="磷%"></td>
+        <td class="waterml"></td>
+        <td><input class="pkg" value="${data.pkg||''}" placeholder="g/包"></td>
+        <td class="waterpkg"></td>
+        <td class="kcalg"></td>
+        <td class="kcalpkg"></td>
+        <td class="proteinDM col-aafco"></td>
+        <td class="fatDM col-aafco"></td>
+        <td class="p1000"></td>
+        <td class="f1000"></td>
+        <td class="pmg100"></td>
+        <td class="lowp"></td>
+        <td class="aafco col-aafco"></td>
+        <td class="lit col-lit"></td>
+        <td class="both col-both"></td>
+        <td><input class="qty" value="${data.qty||0}" step="0.1"></td>
+        <td class="kcalday"></td>
+        <td class="reason"></td>`;
+      document.querySelector('#dataTable tbody').appendChild(tr);
+      tr.querySelectorAll('input').forEach(inp=> inp.addEventListener('input',()=>calc(tr)) );
+      calc(tr);
+    }
+
+    // 七款 NumNum + Lady
+    function examplesA(){
+      return [
+        { name:"香燉嫩雞", protein:11.8, fat:5.7, fiber:0.4, ash:1.5, carb:0.7, moisture:80.3, me:1013, p:0.18, pkg:40, qty:0 },
+        { name:"白帶魚雞", protein:10.8, fat:4.9, fiber:0.4, ash:1.3, carb:0.2, moisture:82.8, me:879, p:0.21, pkg:40, qty:0 },
+        { name:"水針虱目魚", protein:11.2, fat:5.5, fiber:0.4, ash:1.3, carb:0.7, moisture:81.3, me:969, p:0.20, pkg:40, qty:0},
+        { name:"極鮮烏魚", protein:10.5, fat:5.7, fiber:0.4, ash:1.3, carb:1.5, moisture:81.0, me:991, p:0.22, pkg:40, qty:0  },
+        { name:"原野牛腿", protein:11.7, fat:5.8, fiber:0.2, ash:1.3, carb:0.4, moisture:75.8, me:937, p:0.23, pkg:81, qty:0 },
+        { name:"香嫩鴨胸", protein:11.8, fat:6.4, fiber:0.2, ash:1.2, carb:0.2, moisture:76.6, me:925, p:0.19, pkg:81, qty:0 }
+      ];
+    }
+    // 七款 磷蝦系列 + EnergyUp
+    function examplesB(){
+      return [
+        { name:"磷蝦大肉包 雞×蔓越莓（泥）", protein:10.7, fat:4.8, fiber:'', ash:1.3, carb:1.1, moisture:82.1, me:904, p:'0.2073', pkg:'45', qty:0 },
+        { name:"磷蝦大肉包 雞×牛磺酸（泥）", protein:10.2, fat:4.9, fiber:'', ash:1.3, carb:1.4, moisture:82.2, me:905, p:'0.201', pkg:'45', qty:0 },
+        { name:"磷蝦大肉包 雞×UC2（泥）", protein:10.2, fat:4.7, fiber:'', ash:1.3, carb:1.3, moisture:82.5, me:883, p:'', pkg:'45', qty:0 },
+        { name:"磷蝦大肉包 鯖魚×益生元（泥）", protein:11.0, fat:3.3, fiber:'', ash:1.3, carb:0.9, moisture:83.5, me:773, p:'', pkg:'45', qty:0 },
+        { name:"磷蝦大肉包 鯖魚×藜麥（絲）", protein:14.6, fat:2.4, fiber:'', ash:1.3, carb:0.0, moisture:81.7, me:800, p:'', pkg:'45', qty:0 },
+        { name:"磷蝦美毛包 雞×膠原蛋白（泥）", protein:8.7, fat:8.7, fiber:'', ash:1.2, carb:1.4, moisture:79.7, me:1193, p:0.089, pkg:'45', qty:0 },
+        { name:"EnergyUp 吻仔魚×鯖魚", protein:12.5, fat:6.9, fiber:0.2, ash:0.7, carb:'', moisture:79.0, me:1140, p:0.35, pkg:'45', qty:0 }
+      ];
+    }
+    function loadExamplesAll(){
+      const data = [...examplesA(), ...examplesB()];
+      document.querySelector('#dataTable tbody').innerHTML='';
+      data.forEach(addRow);
+    }
+
+    function getTableData(){
+      const rows = [];
+      document.querySelectorAll('#dataTable tbody tr').forEach(tr=>{
+        const pick = cls => { const el = tr.querySelector('input.'+cls); return el? el.value : ''; };
+        rows.push({
+          name: pick('name'),
+          protein: pick('protein'), fat: pick('fat'), fiber: pick('fiber'),
+          ash: pick('ash'), carb: pick('carb'), moisture: pick('moisture'),
+          me: pick('me'), p: pick('p'), pkg: pick('pkg'), qty: pick('qty')
+        });
+      });
+      return rows;
+    }
+    function saveTable(){
+      const data = getTableData();
+      localStorage.setItem(LS_KEY, JSON.stringify(data));
+      alert('已儲存目前表格資料（僅儲存輸入欄位）。');
+    }
+    function loadTable(){
+      const raw = localStorage.getItem(LS_KEY);
+      if(!raw){ alert('尚無儲存資料'); return; }
+      let data=[]; try{ data = JSON.parse(raw); }catch(e){ alert('讀取失敗'); return; }
+      document.querySelector('#dataTable tbody').innerHTML='';
+      data.forEach(obj=> addRow(obj));
+      updateDailySummary();
+      alert('已載入儲存資料。');
+    }
+    function clearSaved(){
+      localStorage.removeItem(LS_KEY);
+      alert('已清除儲存資料。');
+    }
+    function resetQty(){
+      document.querySelectorAll('#dataTable tbody tr input.qty').forEach(inp=>{ inp.value = 0; });
+      document.querySelectorAll('#dataTable tbody tr').forEach(tr=> calc(tr));
+      updateDailySummary();
+    }
+
+    function downloadCSV(){
+      const headers = Array.from(document.querySelectorAll('#dataTable thead th')).map(th=> th.textContent.replace(/\n/g,' '));
+      const rows = Array.from(document.querySelectorAll('#dataTable tbody tr')).map(tr=>
+        Array.from(tr.children).map(td=> td.querySelector('input')? td.querySelector('input').value : td.textContent)
+      );
+      const all = [headers, ...rows];
+      const csv = all.map(r=> r.map(x=> '"'+(x??'').replace(/"/g,'""')+'"').join(',')).join('\n');
+      const blob = new Blob([csv],{type:'text/csv;charset=utf-8;'});
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'AAFCO_DM_all14.csv'; a.click(); URL.revokeObjectURL(a.href);
+    }
+
+    function clearTable(){ document.querySelector('#dataTable tbody').innerHTML=''; updateDailySummary(); }
+
+    // OCR 與貼上
+    document.getElementById('ocrToRow').addEventListener('click', async ()=>{
+      const file = document.getElementById('imgInput').files[0];
+      const status = document.getElementById('ocrStatus');
+      if(!file) return alert('請先選擇圖片檔');
+      status.textContent = '辨識中...';
+      if(!window.Tesseract){ const s=document.createElement('script'); s.src='https://cdn.jsdelivr.net/npm/tesseract.js@4.1.1/dist/tesseract.min.js'; document.body.appendChild(s); await new Promise(r=>setTimeout(r,1500)); }
+      const result = await Tesseract.recognize(file,'eng+chi_tra');
+      const text = result.data.text||''; status.textContent='完成';
+      const pick = (re) => { const m=text.match(re); return m? parseFloat(m[1]) : '' };
+      addRow({
+        name:file.name.replace(/\.[^.]+$/, ''),
+        protein: pick(/(蛋白|Protein)[^\d%]{0,10}([\d\.]+)\s*%/i),
+        fat:     pick(/(脂肪|Fat)[^\d%]{0,10}([\d\.]+)\s*%/i),
+        fiber:   pick(/(纖維|Fiber)[^\d%]{0,10}([\d\.]+)\s*%/i),
+        ash:     pick(/(灰分|Ash)[^\d%]{0,10}([\d\.]+)\s*%/i),
+        moisture:pick(/(水分|Moisture)[^\d%]{0,10}([\d\.]+)\s*%/i),
+        carb:    pick(/(碳水|Carb)[^\d%]{0,10}([\d\.]+)\s*%/i),
+        me:      ( ()=>{ const k100=pick(/([\d\.]+)\s*kcal\s*\/\s*100\s*g/i); if(k100) return k100*10; const kkg=pick(/([\d\.]+)\s*kcal\s*\/\s*kg/i); return kkg||''; } )(),
+        p:       pick(/(磷|Phosphorus)[^\d%]{0,10}([\d\.]+)\s*%/i)
+      });
+    });
+
+    document.getElementById('pasteText').addEventListener('click', ()=>{
+      const t = prompt('請貼上 OCR 或營養文字（會嘗試解析 % 與 kcal）');
+      if(!t) return;
+      const pick = (re) => { const m=t.match(re); return m? parseFloat(m[1]) : '' };
+      addRow({
+        name:'貼上文字',
+        protein: pick(/(蛋白|Protein)[^\d%]{0,10}([\d\.]+)\s*%/i),
+        fat:     pick(/(脂肪|Fat)[^\d%]{0,10}([\d\.]+)\s*%/i),
+        fiber:   pick(/(纖維|Fiber)[^\d%]{0,10}([\d\.]+)\s*%/i),
+        ash:     pick(/(灰分|Ash)[^\d%]{0,10}([\d\.]+)\s*%/i),
+        moisture:pick(/(水分|Moisture)[^\d%]{0,10}([\d\.]+)\s*%/i),
+        carb:    pick(/(碳水|Carb)[^\d%]{0,10}([\d\.]+)\s*%/i),
+        me:      ( ()=>{ const k100=pick(/([\d\.]+)\s*kcal\s*\/\s*100\s*g/i); if(k100) return k100*10; const kkg=pick(/([\d\.]+)\s*kcal\s*\/\s*kg/i); return kkg||''; } )(),
+        p:       pick(/(磷|Phosphorus)[^\d%]{0,10}([\d\.]+)\s*%/i)
+      });
+    });
+
+    // 預設
+    (function init(){ addRow(); applyMode(); updateDailySummary(); })();
+  </script>
+</body>
+</html>
